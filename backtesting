@@ -1,0 +1,84 @@
+#importing libraries
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import talib
+from talib import MA_Type
+
+#downloading data
+ticker = yf.Ticker('AAPL')
+data = ticker.history(period='max')
+
+#defining parameters
+short_window = 30
+long_window = 60
+signal_window = 9
+
+#creating dataframes
+close = data.Close
+ma_short = close.rolling(window=short_window).mean()
+ma_long = close.rolling(window=long_window).mean()
+rsi = talib.RSI(close, timeperiod = signal_window)
+bb_upper, bb_middle, bb_lower = talib.BBANDS(close, matype = MA_Type.T3)
+
+#creating a dataframe for the trading strategy
+dataframe = pd.DataFrame({
+    'close':close,
+    'ma_short':ma_short,
+    'ma_long':ma_long,
+    'rsi':rsi,
+    'bb_upper':bb_upper,
+    'bb_middle':bb_middle,
+    'bb_lower':bb_lower
+})
+
+#defining a signal
+def signal(dataframe):
+    buy = []
+    sell = []
+    flag = -1
+    for i in range(len(dataframe)):
+        if dataframe['ma_short'][i] > dataframe['ma_long'][i] and dataframe['rsi'][i] > 50 and dataframe['close'][i] > dataframe['bb_upper'][i] and flag != 1:
+            buy.append(dataframe['close'][i])
+            sell.append(np.nan)
+            flag = 1
+        elif dataframe['ma_short'][i] < dataframe['ma_long'][i] and dataframe['rsi'][i] < 50 and dataframe['close'][i] < dataframe['bb_lower'][i] and flag != 0:
+            buy.append(np.nan)
+            sell.append(dataframe['close'][i])
+            flag = 0
+        else:
+            buy.append(np.nan)
+            sell.append(np.nan)
+    return (buy, sell)
+
+#creating a buy and sell column
+dataframe['buy signal'], dataframe['sell signal'] = signal(dataframe)
+
+#visualizing the strategy
+fig, ax = plt.subplots(figsize=(16,9))
+ax.plot(dataframe.index, dataframe['close'], label='Close Price')
+ax.plot(dataframe.index, dataframe['ma_short'], label='MA 30')
+ax.plot(dataframe.index, dataframe['ma_long'], label='MA 60')
+ax.plot(dataframe.index, dataframe['bb_upper'], label='Upper BB')
+ax.plot(dataframe.index, dataframe['bb_lower'], label='Lower BB')
+ax.scatter(dataframe.index, dataframe['buy signal'], label='Buy', marker='^', color='green')
+ax.scatter(dataframe.index, dataframe['sell signal'], label='Sell', marker='v', color='red')
+ax.set_ylabel('Price in $')
+ax.legend(loc='upper left')
+plt.title('Backtesting a Trading Strategy')
+plt.show()
+
+#evaluating the strategy
+dataframe['buy_price'] = np.where(dataframe['buy signal'].shift(-1) == np.nan, np.nan, dataframe['buy signal'])
+dataframe['sell_price'] = np.where(dataframe['sell signal'].shift(-1) == np.nan, np.nan, dataframe['sell signal'])
+dataframe['pnl'] = dataframe['sell_price'] - dataframe['buy_price']
+dataframe['status'] = np.where(dataframe['pnl'] > 0, 'Win', 'Lose')
+
+#calculating the win and loss rate
+win_rate = dataframe['status'].value_counts()['Win']/len(dataframe) * 100
+loss_rate = dataframe['status'].value_counts()['Lose']/len(dataframe) * 100
+
+print('Win rate: {:.2f}%'.format(win_rate))
+print('Loss rate: {:.2f}%'.format(loss_rate))
